@@ -1,54 +1,129 @@
 require('dotenv').config();
 
 const PORT = process.env.PORT || 9015;
+const crypto = require('crypto');
 const http = require('http');
 const https = require('https');
+const path = require('path');
 const querystring = require('querystring');
 
 const express = require('express');
-const bodyParser = require('body-parser');
 const helmet = require('helmet');
 const compression = require('compression');
 const axios = require('axios').create({
-  //60 sec timeout
   timeout: 60000,
-  //keepAlive pools and reuses TCP connections, so it's faster
   httpAgent: new http.Agent({ keepAlive: true }),
   httpsAgent: new https.Agent({ keepAlive: true }),
-  //follow up to 10 HTTP 3xx redirects
   maxRedirects: 10
 });
+
+const quotes = require('./quotes');
 const { initIndex, getQuoteByWord } = require('./word-index');
 const isProd = process.env.NODE_ENV === 'production';
 
-// init the express app
+// Initialize the Express app
 const app = express();
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(helmet());
-app.use(compression())
-app.use(express.static('./public'));
+
+// Capture raw body for Slack Signing Secret verification if configured
+const rawBodySaver = (req, res, buf) => {
+  if (buf && buf.length) {
+    req.rawBody = buf.toString('utf8');
+  }
+};
+
+app.use(express.json({ verify: rawBodySaver }));
+app.use(express.urlencoded({ extended: true, verify: rawBodySaver }));
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(compression());
+
+const publicDir = path.join(__dirname, 'public');
+app.use(express.static(publicDir));
+app.use('/slack-ron-swanson-quote-bot', express.static(publicDir));
+
 initIndex();
 
-
-// Do some logging
+// Request logging middleware
 app.use((req, res, next) => {
-  console.log(req.method, req.url);
+  if (process.env.NODE_ENV !== 'test') {
+    console.log(req.method, req.url);
+  }
   next();
 });
 
-// Setup some endpoints
+/**
+ * Verifies incoming Slack webhook requests using either SLACK_SIGNING_SECRET (v0 HMAC-SHA256)
+ * or legacy SLACK_VERIFICATION_TOKEN.
+ */
+function isValidSlackRequest(req) {
+  if (!isProd) {
+    return true;
+  }
+
+  const signingSecret = process.env.SLACK_SIGNING_SECRET;
+  const signature = req.headers['x-slack-signature'];
+  const timestamp = req.headers['x-slack-request-timestamp'];
+
+  if (signingSecret && signature && timestamp) {
+    const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 60 * 5;
+    if (Number(timestamp) < fiveMinutesAgo) {
+      return false;
+    }
+
+    const sigBasestring = `v0:${timestamp}:${req.rawBody || ''}`;
+    const mySignature =
+      'v0=' +
+      crypto
+        .createHmac('sha256', signingSecret)
+        .update(sigBasestring, 'utf8')
+        .digest('hex');
+
+    const sigBuffer = Buffer.from(signature, 'utf8');
+    const mySigBuffer = Buffer.from(mySignature, 'utf8');
+    return (
+      sigBuffer.length === mySigBuffer.length &&
+      crypto.timingSafeEqual(sigBuffer, mySigBuffer)
+    );
+  }
+
+  return Boolean(req.body && req.body.token === process.env.SLACK_VERIFICATION_TOKEN);
+}
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    ok: true,
+    quotesCount: quotes.length
+  });
+});
+
+// Public JSON API endpoint for fetching a random or topic-matched quote
+app.get('/api/quote', (req, res) => {
+  const query = req.query.text || req.query.q || '';
+  const quoteObj = getQuoteByWord(query);
+  res.json(quoteObj);
+});
+
+// Slack Slash Command endpoint
 app.post('/ron', (req, res) => {
-  // the request should have our slack verification token in it so we know it's coming from Slack
-  if (isProd && req.body.token !== process.env.SLACK_VERIFICATION_TOKEN) {
-    res.status(400).send(`Invalid request.`);
+  if (!isValidSlackRequest(req)) {
+    res.status(400).send('Invalid request.');
     return;
   }
 
-  const quoteObj = getQuoteByWord(req.body.text);
+  const text = req.body && typeof req.body.text === 'string' ? req.body.text.trim() : '';
+
+  if (text.toLowerCase() === 'help') {
+    res.json({
+      response_type: 'ephemeral',
+      text: 'Type `/ron` for a random Ron Swanson quote, or `/ron <topic>` (e.g. `/ron bacon`, `/ron yoga`, `/ron canvas`) to get a quote matching your topic.'
+    });
+    return;
+  }
+
+  const quoteObj = getQuoteByWord(text);
   log(quoteObj, req);
-  
-  res.json({ 
+
+  res.json({
     response_type: 'in_channel',
     text: quoteObj.quote
   });
@@ -56,21 +131,19 @@ app.post('/ron', (req, res) => {
 
 // If the user authorizes your app, Slack will redirect back to your specified redirect_uri with a temporary code in a code GET parameter
 app.get('/slack-oauth', (req, res) => {
-  if(!req.query.code) {
-    res.status(403).send(`Access denied.`);
+  if (!req.query.code) {
+    res.status(403).send('Access denied.');
     return;
   }
 
-  // exchange temp auth code for access token that does not expires (unless user revokes it)
+  // Exchange temporary auth code for access token
   getToken(req.query.code)
     .then(getTeamDomain)
-    // redirect to their team slack
-    .then(teamDomain => res.redirect(`http://${teamDomain}.slack.com`))
+    .then(teamDomain => res.redirect(`https://${teamDomain}.slack.com`))
     .catch(err => {
       console.error(err.message);
-      res.status(500).send(`Uh oh.`);
+      res.status(500).send('Uh oh.');
     });
-  
 });
 
 function getToken(authCode) {
@@ -80,33 +153,42 @@ function getToken(authCode) {
     code: authCode
   };
 
-  return axios.get(`https://slack.com/api/oauth.access?${querystring.stringify(data)}`)
+  return axios
+    .get(`https://slack.com/api/oauth.access?${querystring.stringify(data)}`)
     .then(response => {
       if (response.status === 200 && response.data.ok) {
         return response.data.access_token;
-      } else {
-        throw new Error(`Unable to get token: ${response.data.error}`);
       }
+      throw new Error(`Unable to get token: ${response.data.error}`);
     });
 }
 
 function getTeamDomain(token) {
-  return axios.get(`https://slack.com/api/team.info?token=${token}`)
+  return axios
+    .get(`https://slack.com/api/team.info?token=${encodeURIComponent(token)}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
     .then(response => {
       if (response.data.ok && response.data.team) {
         return response.data.team.domain;
-      } else {
-        throw new Error(`Unable to get team domain: ${response.data.error}`);
       }
+      throw new Error(`Unable to get team domain: ${response.data.error}`);
     });
 }
 
 function log(quoteObj, req) {
-  console.log(`Team domain: "${req.body.team_domain}", Channel name: "${req.body.channel_name}", User: "${req.body.user_name}", Date: ${new Date().toLocaleString()}`);
+  if (process.env.NODE_ENV === 'test') return;
+  const body = req.body || {};
+  console.log(
+    `Team domain: "${body.team_domain || ''}", Channel name: "${body.channel_name || ''}", User: "${body.user_name || ''}", Date: ${new Date().toLocaleString()}`
+  );
   console.log(JSON.stringify(quoteObj, null, 2));
 }
 
+if (require.main === module) {
+  http.createServer(app).listen(PORT, () => {
+    console.log(`Server started on *:${PORT}`);
+  });
+}
 
-// Start the server
-http.createServer(app).listen(PORT);
-console.log(`Server started on *:${PORT}`);
+module.exports = app;

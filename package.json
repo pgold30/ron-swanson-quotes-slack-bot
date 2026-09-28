@@ -1,21 +1,33 @@
 {
   "name": "ron-swanson-bot",
-  "version": "1.0.0",
-  "description": "",
+  "version": "1.1.0",
+  "description": "Adds a slash command to post Ron Swanson quotes to Slack.",
   "main": "index.js",
   "scripts": {
-    "start": "NODE_ENV=production pm2 start index.js --name ron -i 0"
+    "start": "node index.js",
+    "start:pm2": "NODE_ENV=production pm2 start index.js --name ron -i 0",
+    "dev": "node --watch index.js",
+    "test": "NODE_ENV=test node --test"
   },
-  "keywords": [],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pgold30/ron-swanson-quotes-slack-bot.git"
+  },
+  "keywords": [
+    "slack",
+    "slash-command",
+    "slack-bot",
+    "ron-swanson",
+    "quotes",
+    "parks-and-recreation"
+  ],
   "author": "Pablo Loschi",
   "license": "ISC",
   "dependencies": {
-    "axios": "^0.16.2",
-    "body-parser": "^1.17.2",
-    "compression": "^1.7.0",
-    "dotenv": "^4.0.0",
-    "express": "^4.15.3",
-    "helmet": "^3.6.1",
-    "lodash": "^4.17.4"
+    "axios": "^1.7.9",
+    "compression": "^1.7.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0"
   }
 }
