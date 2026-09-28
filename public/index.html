@@ -31,26 +31,41 @@
         border-radius: 8px;
         box-shadow: 0 2px 6px rgba(0,0,0,.06);
         padding: 2em;
-        max-width: 620px;
+        max-width: 640px;
         width: 100%;
         margin: 0 auto;
       }
       h1 {
         margin: 0;
-        margin-left: 14px;
         font-size: 1.65rem;
+      }
+      .subtitle {
+        margin: 4px 0 0 0;
+        font-size: 0.92rem;
+        color: #666;
       }
       .hgroup img {
         border-radius: 6px;
-        width: 64px;
-        height: 64px;
+        width: 72px;
+        height: 72px;
         object-fit: cover;
+        flex-shrink: 0;
       }
       .hgroup {
         display: flex;
         flex-direction: row;
         align-items: center;
-        margin-bottom: 1.5em;
+        gap: 14px;
+        margin-bottom: 1.25em;
+      }
+      .context-box {
+        background: #faf8f5;
+        border: 1px solid #ece6dd;
+        border-radius: 6px;
+        padding: 0.9em 1.1em;
+        font-size: 0.95rem;
+        color: #4a4a4a;
+        margin-bottom: 1.25em;
       }
       code {
         background: #ebebeb;
@@ -118,8 +133,16 @@
     <div class="container">
       <div class="hgroup">
         <img src="ron-swanson.jpg" alt="Ron Swanson" />
-        <h1>Ron Swanson Quotes Slack Bot</h1>
+        <div>
+          <h1>Ron Swanson Quotes Slack Bot</h1>
+          <p class="subtitle">Wisdom from Pawnee's Director of Parks &amp; Recreation</p>
+        </div>
       </div>
+
+      <div class="context-box">
+        <strong>About Ron Swanson:</strong> Portrayed by Nick Offerman on the hit NBC comedy series <em>Parks and Recreation</em> (2009–2015), Ron Swanson is the deadpan, libertarian Director of the Pawnee Parks Department—renowned for his love of breakfast food, bacon, woodworking, single malt Scotch, and doing as little government work as humanly possible.
+      </div>
+
       <p>
         Click the button below to add the bot to your Slack workspace. First you'll be redirected to Slack where you'll authorize the bot, then you'll be redirected back to your team's Slack.
       </p>
